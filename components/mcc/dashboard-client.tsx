@@ -1,0 +1,399 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { Activity, Bot, Brain, Clock3, Cpu, HardDrive, MemoryStick, ArrowRight, AlertCircle, CheckCircle2, Lock, Zap, Check, Monitor, Server, Files } from "lucide-react";
+
+type StatsResponse = {
+  cpu: { usagePercent: number };
+  memory: { used: number; total: number; free: number; usedPercent: number };
+  disk: { filesystem?: string; size?: string; used?: string; available?: string; usePercent?: string; mountedOn?: string };
+  uptimeSeconds: number;
+  gatewayOnline: boolean;
+};
+
+type Task = { id?: string; title?: string; status?: string; priority?: string; notes?: string; [key: string]: unknown };
+type LogsResponse = { source?: string; lines: string[] };
+
+function bytesToGB(v: number) {
+  return (v / 1024 / 1024 / 1024).toFixed(1);
+}
+
+function formatUptime(seconds: number) {
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+function getGreeting() {
+  const h = new Date().getHours();
+  if (h < 6) return "Gute Nacht";
+  if (h < 12) return "Guten Morgen";
+  if (h < 18) return "Guten Tag";
+  return "Guten Abend";
+}
+
+function isErrorLine(line: string) {
+  return /\berror\b|\bexception\b|\bfailed\b|\bfatal\b/i.test(line);
+}
+
+function GaugeRing({ value, max, label, icon: Icon, color, unit, compact }: { value: number; max: number; label: string; icon: React.ElementType; color: string; unit: string; compact?: boolean }) {
+  const pct = Math.min(max > 0 ? (value / max) * 100 : 0, 100);
+  const radius = compact ? 30 : 40;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference - (pct / 100) * circumference;
+  const strokeColor = pct > 85 ? "#ef4444" : pct > 60 ? "#f59e0b" : color === "violet" ? "#8b5cf6" : color === "blue" ? "#3b82f6" : "#10b981";
+  const size = compact ? 72 : 96;
+  const viewBox = compact ? "0 0 72 72" : "0 0 96 96";
+  const cx = compact ? 36 : 48;
+
+  return (
+    <div className={`glass-card flex flex-col items-center gap-2 card-hover ${compact ? "p-3" : "p-5 gap-3"}`}>
+      <div className={`relative ${compact ? "h-[72px] w-[72px]" : "h-24 w-24"}`}>
+        <svg className={`${compact ? "h-[72px] w-[72px]" : "h-24 w-24"} -rotate-90`} viewBox={viewBox}>
+          <circle cx={cx} cy={cx} r={radius} fill="none" stroke="#27272a" strokeWidth={compact ? 5 : 6} />
+          <circle cx={cx} cy={cx} r={radius} fill="none" stroke={strokeColor} strokeWidth={compact ? 5 : 6} strokeLinecap="round" strokeDasharray={circumference} strokeDashoffset={offset} style={{ transition: "stroke-dashoffset 1s ease-out" }} />
+        </svg>
+        <div className="absolute inset-0 flex flex-col items-center justify-center">
+          <span className={`font-bold text-zinc-100 ${compact ? "text-sm" : "text-lg"}`}>{pct.toFixed(0)}%</span>
+        </div>
+      </div>
+      <div className="flex items-center gap-1.5 text-zinc-400">
+        <Icon className={compact ? "h-3 w-3" : "h-3.5 w-3.5"} />
+        <span className={`font-medium ${compact ? "text-[10px]" : "text-xs"}`}>{label}</span>
+      </div>
+      <p className={`text-zinc-500 ${compact ? "text-[9px]" : "text-[11px]"}`}>{value}{unit} / {max}{unit}</p>
+    </div>
+  );
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const config: Record<string, { bg: string; text: string; icon: React.ElementType }> = {
+    done: { bg: "bg-emerald-500/10 border-emerald-500/20", text: "text-emerald-400", icon: CheckCircle2 },
+    blocked: { bg: "bg-red-500/10 border-red-500/20", text: "text-red-400", icon: Lock },
+    open: { bg: "bg-amber-500/10 border-amber-500/20", text: "text-amber-400", icon: AlertCircle },
+    in_progress: { bg: "bg-blue-500/10 border-blue-500/20", text: "text-blue-400", icon: Activity },
+  };
+  const c = config[status] ?? config.open;
+  const Icon = c.icon;
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium ${c.bg} ${c.text}`}>
+      <Icon className="h-3 w-3" />
+      {status}
+    </span>
+  );
+}
+
+export default function DashboardClient({ tasks: initialTasks, memoryFiles }: { tasks: Task[]; memoryFiles: { name: string; path: string; displayDate: string }[] }) {
+  const [vpsStats, setVpsStats] = useState<StatsResponse | null>(null);
+  const [pcStats, setPcStats] = useState<StatsResponse | null>(null);
+  const [logs, setLogs] = useState<LogsResponse>({ lines: [] });
+  const [tasks, setTasks] = useState<Task[]>(initialTasks);
+  const [loadingStats, setLoadingStats] = useState(true);
+  const [actionItems, setActionItems] = useState<Task[]>([]);
+  const [loadingTasks, setLoadingTasks] = useState(false);
+  const [statsView, setStatsView] = useState<"vps" | "pc" | "both">("both");
+
+  const loadStats = async () => {
+    try {
+      const res = await fetch("/mcc/api/system/stats", { cache: "no-store" });
+      if (res.ok) setVpsStats(await res.json());
+    } catch {
+    } finally {
+      setLoadingStats(false);
+    }
+    try {
+      const res = await fetch("/mcc/api/system/stats?source=pc", { cache: "no-store" });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.cpu) setPcStats(data);
+      }
+    } catch {
+    }
+  };
+
+  const loadLogs = async () => {
+    try {
+      const res = await fetch("/mcc/api/system/logs", { cache: "no-store" });
+      if (res.ok) setLogs(await res.json());
+    } catch {
+      setLogs({ source: "error", lines: ["Konnte Logs nicht laden."] });
+    }
+  };
+
+  const loadTasks = async () => {
+    try {
+      const res = await fetch("/mcc/api/tasks", { cache: "no-store" });
+      if (res.ok) {
+        const data = await res.json();
+        setTasks(data.tasks);
+        const userTasks = data.tasks.filter((t: Task) => t.source === "user" || !t.source);
+        const blocked = userTasks.filter((t: Task) => t.status === "blocked");
+        const highPrioOpen = userTasks.filter((t: Task) => t.priority === "high" && t.status === "open");
+        const criticalOpen = userTasks.filter((t: Task) => t.priority === "critical" && t.status === "open");
+        setActionItems([...criticalOpen, ...blocked, ...highPrioOpen]);
+      }
+    } catch {
+    }
+  };
+
+  const handleTaskComplete = async (id: string | undefined) => {
+    if (!id) return;
+    try {
+      setLoadingTasks(true);
+      const res = await fetch(`/mcc/api/tasks/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "done" }),
+      });
+      if (res.ok) await loadTasks();
+    } catch {
+    } finally {
+      setLoadingTasks(false);
+    }
+  };
+
+  useEffect(() => {
+    loadStats();
+    loadLogs();
+    loadTasks();
+    const t1 = setInterval(loadStats, 10000);
+    const t2 = setInterval(loadLogs, 30000);
+    const t3 = setInterval(loadTasks, 60000);
+    return () => { clearInterval(t1); clearInterval(t2); clearInterval(t3); };
+  }, []);
+
+  const userTasks = tasks.filter((t) => t.source === "user" || !t.source);
+  const openTasks = userTasks.filter((t) => t.status !== "done" && t.status !== "archived");
+  const doneTasks = userTasks.filter((t) => t.status === "done");
+
+  return (
+    <div className="space-y-6 animate-in min-w-0 max-w-full overflow-hidden">
+      <div className="flex items-end justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-zinc-100">{getGreeting()}, Jannis</h1>
+          <p className="mt-1 text-sm text-zinc-500">Hier ist dein System-Status auf einen Blick.</p>
+        </div>
+        {vpsStats && (
+          <div className="hidden items-center gap-2 text-xs text-zinc-500 sm:flex">
+            <Activity className="h-3.5 w-3.5" />
+            <span>VPS Uptime: {formatUptime(vpsStats.uptimeSeconds)}</span>
+          </div>
+        )}
+      </div>
+
+      <div className="glass-card p-5 border-l-4 border-l-violet-500">
+        <div className="mb-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Zap className="h-5 w-5 text-violet-400" />
+            <h2 className="text-base font-bold text-zinc-100">Deine Action Items</h2>
+          </div>
+          {actionItems.length === 0 && (
+            <span className="flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-400 border border-emerald-500/20">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              Alles erledigt
+            </span>
+          )}
+        </div>
+        {actionItems.length > 0 ? (
+          <div className="space-y-3">
+            {actionItems.map((task, i) => (
+              <div key={`task-${task.id}-${i}`} className="flex items-start justify-between rounded-lg bg-zinc-950/40 p-3 border border-zinc-800/60">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-zinc-200">{task.title}</span>
+                    {task.status === "blocked" && (
+                      <span className="rounded bg-red-500/10 px-1.5 py-0.5 text-[10px] font-bold text-red-400 border border-red-500/20">BLOCKED</span>
+                    )}
+                    {task.priority === "high" && task.status === "open" && (
+                      <span className="rounded bg-orange-500/10 px-1.5 py-0.5 text-[10px] font-bold text-orange-400 border border-orange-500/20">HIGH PRIO</span>
+                    )}
+                  </div>
+                  {task.notes && <p className="text-xs text-zinc-500 line-clamp-1">{task.notes}</p>}
+                </div>
+                {task.status !== "blocked" && (
+                  <button
+                    onClick={() => handleTaskComplete(task.id)}
+                    disabled={loadingTasks}
+                    className="shrink-0 p-1.5 rounded-md hover:bg-zinc-800 text-zinc-400 hover:text-emerald-400 transition-colors disabled:opacity-50"
+                    title="Als erledigt markieren"
+                  >
+                    <Check className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-zinc-500">Keine blockierten Tasks oder offenen High-Priority Tasks.</p>
+        )}
+      </div>
+
+      <div>
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-zinc-200">System-Auslastung</h2>
+          <div className="flex items-center gap-1 rounded-lg border border-zinc-800/60 bg-zinc-900/40 p-1">
+            <button onClick={() => setStatsView("both")} className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-medium transition-all ${statsView === "both" ? "bg-violet-500/15 text-violet-400" : "text-zinc-500 hover:text-zinc-300"}`}>
+              Beide
+            </button>
+            <button onClick={() => setStatsView("vps")} className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-medium transition-all ${statsView === "vps" ? "bg-violet-500/15 text-violet-400" : "text-zinc-500 hover:text-zinc-300"}`}>
+              <Server className="h-3 w-3" />VPS
+            </button>
+            <button onClick={() => setStatsView("pc")} className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-medium transition-all ${statsView === "pc" ? "bg-violet-500/15 text-violet-400" : "text-zinc-500 hover:text-zinc-300"}`}>
+              <Monitor className="h-3 w-3" />PC
+            </button>
+          </div>
+        </div>
+
+        {loadingStats ? (
+          <div className="grid gap-4 md:grid-cols-3">
+            {[1, 2, 3].map((i) => <div key={`skeleton-${i}`} className="glass-card h-44 shimmer" />)}
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {(statsView === "both" || statsView === "vps") && vpsStats && (
+              <div>
+                {statsView === "both" && (
+                  <div className="mb-2 flex items-center gap-2">
+                    <Server className="h-3.5 w-3.5 text-emerald-400" />
+                    <span className="text-xs font-medium text-zinc-400">VPS (Contabo)</span>
+                    <span className="text-[10px] text-zinc-600">Uptime: {formatUptime(vpsStats.uptimeSeconds)}</span>
+                  </div>
+                )}
+                <div className={`grid gap-4 ${statsView === "both" ? "md:grid-cols-3" : "md:grid-cols-3"}`}>
+                  <GaugeRing value={vpsStats.cpu.usagePercent} max={100} label="CPU" icon={Cpu} color="violet" unit="%" compact={statsView === "both"} />
+                  <GaugeRing value={Number(bytesToGB(vpsStats.memory.used))} max={Number(bytesToGB(vpsStats.memory.total))} label="RAM" icon={MemoryStick} color="blue" unit=" GB" compact={statsView === "both"} />
+                  <GaugeRing value={parseFloat(vpsStats.disk.used ?? "0")} max={parseFloat(vpsStats.disk.size ?? "1")} label="Disk" icon={HardDrive} color="emerald" unit=" GB" compact={statsView === "both"} />
+                </div>
+              </div>
+            )}
+
+            {(statsView === "both" || statsView === "pc") && (
+              <div>
+                {statsView === "both" && (
+                  <div className="mb-2 flex items-center gap-2">
+                    <Monitor className="h-3.5 w-3.5 text-blue-400" />
+                    <span className="text-xs font-medium text-zinc-400">Lokaler PC</span>
+                  </div>
+                )}
+                {pcStats ? (
+                  <div className="grid gap-4 md:grid-cols-3">
+                    <GaugeRing value={pcStats.cpu.usagePercent} max={100} label="CPU" icon={Cpu} color="violet" unit="%" compact={statsView === "both"} />
+                    <GaugeRing value={Number(bytesToGB(pcStats.memory.used))} max={Number(bytesToGB(pcStats.memory.total))} label="RAM" icon={MemoryStick} color="blue" unit=" GB" compact={statsView === "both"} />
+                    <GaugeRing value={parseFloat(pcStats.disk.used ?? "0")} max={parseFloat(pcStats.disk.size ?? "1")} label="Disk" icon={HardDrive} color="emerald" unit=" GB" compact={statsView === "both"} />
+                  </div>
+                ) : (
+                  <div className="glass-card flex items-center justify-center py-8">
+                    <div className="text-center">
+                      <Monitor className="mx-auto mb-2 h-6 w-6 text-zinc-700" />
+                      <p className="text-xs text-zinc-500">PC-Stats nicht verfuegbar</p>
+                      <p className="text-[10px] text-zinc-600 mt-1">Starte den MCC PC-Agent auf deinem Rechner</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2 min-w-0">
+        <div className="glass-card p-5">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-zinc-200">Aktive Tasks</h2>
+            <span className="rounded-full bg-violet-500/10 px-2 py-0.5 text-[11px] font-medium text-violet-400">{openTasks.length} offen</span>
+          </div>
+          <div className="space-y-2">
+            {openTasks.map((task, i) => (
+              <div key={`task-${task.id ?? i}-${i}`} className="flex items-center justify-between rounded-lg bg-zinc-950/50 px-3 py-2.5 group">
+                <div className="flex flex-col min-w-0 pr-2">
+                  <span className="text-sm text-zinc-300 truncate">{String(task.title ?? task.id ?? `Task ${i + 1}`)}</span>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <StatusBadge status={String(task.status ?? "open")} />
+                  {task.status !== "blocked" && (
+                    <button
+                      onClick={() => handleTaskComplete(task.id)}
+                      disabled={loadingTasks}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-zinc-800 text-zinc-400 hover:text-emerald-400"
+                      title="Erledigen"
+                    >
+                      <Check className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+            {doneTasks.length > 0 && <p className="pt-1 text-[11px] text-zinc-600">{doneTasks.length} erledigt</p>}
+            {tasks.length === 0 && <p className="py-3 text-sm text-zinc-500">Keine aktiven Tasks.</p>}
+          </div>
+        </div>
+
+        <div className="glass-card p-5">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-zinc-200">Memory-Dateien</h2>
+            <Link href="/memory" className="flex items-center gap-1 text-[11px] text-violet-400 hover:text-violet-300 transition-colors">
+              Alle anzeigen <ArrowRight className="h-3 w-3" />
+            </Link>
+          </div>
+          <div className="space-y-1.5">
+            {memoryFiles.slice(0, 8).map((file, i) => (
+              <div key={`file-${file.path}-${i}`} className="flex items-center justify-between rounded-lg bg-zinc-950/50 px-3 py-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Brain className="h-3.5 w-3.5 text-zinc-600 shrink-0" />
+                  <span className="text-sm text-zinc-300 truncate">{file.name}</span>
+                </div>
+                <span className="text-[11px] text-zinc-600 shrink-0 ml-2">{file.displayDate}</span>
+              </div>
+            ))}
+            {memoryFiles.length === 0 && <p className="py-3 text-sm text-zinc-500">Keine Dateien.</p>}
+          </div>
+        </div>
+      </div>
+
+      <div className="glass-card p-5">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-zinc-200">System Logs</h2>
+          <span className="text-[11px] text-zinc-600">{logs.source ?? "-"}</span>
+        </div>
+        <div className="max-h-56 overflow-y-auto overflow-x-hidden rounded-lg bg-zinc-950 border border-zinc-800/40 p-3 terminal">
+          {(logs.lines ?? []).map((line, i) => (
+            <div key={`log-${i}-${line.slice(0, 16)}`} className={`py-0.5 break-all whitespace-pre-wrap ${isErrorLine(line) ? "text-red-400" : "text-zinc-500"}`}>{line}</div>
+          ))}
+          {!logs.lines?.length && <div className="text-zinc-600">Keine Logs.</div>}
+        </div>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-3 min-w-0">
+        <Link href="/agents" className="glass-card p-4 card-hover flex items-center gap-3 group">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-violet-500/10"><Bot className="h-4 w-4 text-violet-400" /></div>
+          <div><p className="text-sm font-medium text-zinc-200">15 Agenten</p><p className="text-[11px] text-zinc-500">Status & Sessions</p></div>
+          <ArrowRight className="ml-auto h-4 w-4 text-zinc-600 transition-transform group-hover:translate-x-1" />
+        </Link>
+        <Link href="/cron" className="glass-card p-4 card-hover flex items-center gap-3 group">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500/10"><Clock3 className="h-4 w-4 text-emerald-400" /></div>
+          <div><p className="text-sm font-medium text-zinc-200">19 Cron Jobs</p><p className="text-[11px] text-zinc-500">Verwalten & Triggern</p></div>
+          <ArrowRight className="ml-auto h-4 w-4 text-zinc-600 transition-transform group-hover:translate-x-1" />
+        </Link>
+        <Link href="/comms" className="glass-card p-4 card-hover flex items-center gap-3 group">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-500/10"><Brain className="h-4 w-4 text-blue-400" /></div>
+          <div><p className="text-sm font-medium text-zinc-200">Comms Center</p><p className="text-[11px] text-zinc-500">Agent-Unterhaltungen</p></div>
+          <ArrowRight className="ml-auto h-4 w-4 text-zinc-600 transition-transform group-hover:translate-x-1" />
+        </Link>
+        <Link href="/files" className="glass-card p-4 card-hover flex items-center gap-3 group">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-orange-500/10"><Files className="h-4 w-4 text-orange-400" /></div>
+          <div><p className="text-sm font-medium text-zinc-200">Dateien</p><p className="text-[11px] text-zinc-500">System-Files</p></div>
+          <ArrowRight className="ml-auto h-4 w-4 text-zinc-600 transition-transform group-hover:translate-x-1" />
+        </Link>
+        <Link href="/todo" className="glass-card p-4 card-hover flex items-center gap-3 group">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-yellow-500/10"><CheckCircle2 className="h-4 w-4 text-yellow-400" /></div>
+          <div><p className="text-sm font-medium text-zinc-200">TODOs</p><p className="text-[11px] text-zinc-500">Tasks verwalten</p></div>
+          <ArrowRight className="ml-auto h-4 w-4 text-zinc-600 transition-transform group-hover:translate-x-1" />
+        </Link>
+      </div>
+    </div>
+  );
+}
