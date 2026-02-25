@@ -1,83 +1,71 @@
-# Mission Control Center (MCC)
-**Repo:** [https://github.com/Jas0nOW/Wanda-MCC](https://github.com/Jas0nOW/Wanda-MCC)
+<div align="center">
+  <h1>🎛️ WANDA Mission Control Center (MCC)</h1>
+  <p><strong>The Visual Intelligence Dashboard for the WANDA Ecosystem.</strong></p>
+  <a href="https://github.com/Jas0nOW/Wanda-MCC">View Repository</a>
+</div>
 
-Initiales Next.js 14 Setup für das MCC mit:
+---
 
-- App Router
-- Tailwind CSS
-- shadcn/ui Basis-Konfiguration
-- Basic Auth Middleware
-- Dashboard unter `/`
-- API Route `/api/tasks` (liest `active_tasks.json`)
+The **Mission Control Center (MCC)** is a modern Next.js 14 web application providing a centralized, visual dashboard for managing the WANDA AI ecosystem. It interfaces directly with the stateless WANDA Central Hub (`localhost:3000`) and the `Vox-Voice` memory systems.
 
-## Voraussetzungen
+Designed for efficiency and rapid observability, the MCC allows you to monitor running agents, manage tasks, review system logs, and inspect persistent memory items in real-time.
 
+## ✨ Key Features
+
+- **Real-Time Observability:** Monitor active AI tasks, background processes, and open blockers directly on the dashboard.
+- **Agent Oversight:** View all connected subagents (e.g., Kraken, n8n, Supabase) and their current activity status.
+- **Memory & File Explorer:** Directly browse and search through the global WANDA memory vaults (`workspace/memory`) and system files without leaving the browser.
+- **Secure Access:** Built-in Basic Authentication and environment-based path resolution to protect local and VPS deployments.
+- **Modern Tech Stack:** Built with Next.js 14 (App Router), Tailwind CSS, and `shadcn/ui` for a responsive, clean, and highly functional interface.
+
+## 🚀 Quick Start
+
+### Prerequisites
 - Node.js 20+
-- npm
+- A running instance of the [WANDA Central Hub](https://github.com/Jas0nOW/WANDA) (for API interactions).
 
-## Installation
+### Local Setup
 
 ```bash
+# Clone the repository
+git clone https://github.com/Jas0nOW/Wanda-MCC.git
+cd Wanda-MCC/app
+
+# Install dependencies
 npm install
-```
 
-## Development starten
+# Setup environment variables (copy from template if available, else standard paths are assumed)
+# See Configuration section below
 
-```bash
+# Start the dev server
 npm run dev
 ```
+Open `http://localhost:3000` in your browser.
 
-Danach öffnen: `http://localhost:3000`
+## 🔐 Configuration & Security
 
-## Basic Auth
+The MCC relies on specific paths to read logs, memory, and tasks. These paths should be defined in a `.env.local` file at the `app/` directory root:
 
-Default Credentials:
+```env
+WORKSPACE_PATH=/data/.openclaw/workspace
+OPENCLAW_ROOT=/data/.openclaw
+OPENCLAW_AGENTS_DIR=/data/.openclaw/agents
 
-- Username: `jannis`
-- Password: `wanda2026`
+# Basic Authentication Credentials
+MCC_BASIC_AUTH_USER="jannis"
+MCC_BASIC_AUTH_PASS="your_secure_password"
+```
 
-Optional via ENV überschreiben:
-
-- `MCC_BASIC_AUTH_USER`
-- `MCC_BASIC_AUTH_PASS`
-
-## Build & Production
+## 🏗️ Build & Deployment (VPS)
 
 ```bash
+# Create an optimized production build
 npm run build
+
+# Start the production server
 npm run start
 ```
+*Tip: For production usage on a VPS, it is recommended to run the app behind a reverse proxy like Nginx or Caddy with SSL enabled.*
 
-## Deployment (VPS)
-
-Minimaler Ablauf:
-
-1. Projekt auf den Server kopieren (z. B. per git clone/scp)
-2. Im Projektverzeichnis ausführen:
-   - `npm install`
-   - `npm run build`
-3. App starten:
-   - `npm run start`
-4. Optional über Reverse Proxy (Nginx/Caddy) unter Domain bereitstellen.
-
-## Projektstruktur
-
-```txt
-app/
-├── app/
-│   ├── api/
-│   │   ├── system/route.ts
-│   │   └── tasks/route.ts
-│   ├── globals.css
-│   ├── layout.tsx
-│   └── page.tsx
-├── components/ui/
-│   ├── badge.tsx
-│   └── card.tsx
-├── lib/utils.ts
-├── middleware.ts
-├── next.config.js
-├── package.json
-├── tailwind.config.js
-└── tsconfig.json
-```
+---
+*Built under the JANNIS PROTOCOL — The Visual Face of the AI Ecosystem.*
