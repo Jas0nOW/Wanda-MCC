@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import fs from "fs/promises";
 
-const CRON_PATH = process.env.CRON_PATH ?? process.env.OPENCLAW_ROOT || "/data/.openclaw/cron/jobs.json";
+const CRON_PATH = (process.env.CRON_PATH || process.env.OPENCLAW_ROOT) || "/data/.openclaw/cron/jobs.json";
 
 type CronJob = {
   id: string;

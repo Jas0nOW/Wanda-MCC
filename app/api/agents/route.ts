@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import fs from "fs/promises";
 
-const CONFIG_PATH = process.env.CONFIG_PATH ?? process.env.OPENCLAW_ROOT || "/data/.openclaw/openclaw.json";
+const CONFIG_PATH = process.env.CONFIG_PATH || process.env.OPENCLAW_ROOT || "/data/.openclaw/openclaw.json";
 
 export async function GET() {
   try {

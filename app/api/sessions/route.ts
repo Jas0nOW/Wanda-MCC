@@ -4,7 +4,7 @@ import path from "path";
 import { createReadStream, existsSync } from "fs";
 import readline from "readline";
 
-const AGENTS_DIR = process.env.OPENCLAW_AGENTS_DIR ?? process.env.OPENCLAW_ROOT || "/data/.openclaw/agents";
+const AGENTS_DIR = process.env.OPENCLAW_AGENTS_DIR || process.env.OPENCLAW_ROOT || "/data/.openclaw/agents";
 
 type SessionMeta = {
   id: string;
@@ -18,7 +18,7 @@ type SessionMeta = {
 type MessageBlock =
   | { type: "text"; text: string }
   | { type: "thinking"; thinking: string }
-  | { type: string; [key: string]: unknown };
+  | { type: string;[key: string]: unknown };
 
 interface JournalMessage {
   role: "user" | "assistant" | "system";

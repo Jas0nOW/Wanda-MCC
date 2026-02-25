@@ -22,7 +22,7 @@ type TasksData = {
 
 export async function GET() {
   try {
-    const workspacePath = process.env.WORKSPACE_PATH ?? process.env.WORKSPACE_PATH || process.env.OPENCLAW_ROOT || "/data/.openclaw/workspace";
+    const workspacePath = (process.env.WORKSPACE_PATH || process.env.OPENCLAW_ROOT) || "/data/.openclaw/workspace";
     const tasksFilePath = path.join(workspacePath, "active_tasks.json");
 
     // Prüfen ob Datei existiert

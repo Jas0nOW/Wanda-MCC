@@ -13,7 +13,7 @@ export async function listDir(p: string) {
         name: e.name,
         path: path.join(fullPath, e.name),
         isDirectory: e.isDirectory()
-      }))
+      })
     };
   } catch (err: any) {
     console.error("listDir error:", err.message);

@@ -3,19 +3,18 @@ import path from "node:path";
 import { format } from "date-fns";
 import DashboardClient from "@/components/mcc/dashboard-client";
 
-const WORKSPACE_ROOT = process.env.WORKSPACE_PATH ?? process.env.WORKSPACE_PATH || process.env.OPENCLAW_ROOT || "/data/.openclaw/workspace";
+const WORKSPACE_ROOT = process.env.WORKSPACE_PATH || process.env.OPENCLAW_ROOT || "/data/.openclaw/workspace";
 
-type Task = { id?: string; title?: string; status?: "open" | "blocked" | "done" | string; priority?: string; [key: string]: unknown };
+type Task = { id?: string; title?: string; status?: "open" | "blocked" | "done" | string; priority?: string;[key: string]: unknown };
 
 async function getActiveTasks(): Promise<Task[]> {
   try {
     const p = path.join(WORKSPACE_ROOT, "active_tasks.json");
     console.log("Reading tasks from:", p);
     const file = await fs.readFile(p, "utf-8");
-    console.log("File content length:", file.length);
     const parsed = JSON.parse(file);
     if (Array.isArray(parsed)) return parsed;
-    if (Array.isArray(parsed.tasks)) return parsed.tasks;
+    if (parsed && Array.isArray(parsed.tasks)) return parsed.tasks;
     return [];
   } catch (e) {
     console.error("Error reading tasks:", e);
@@ -32,7 +31,12 @@ async function getMemoryFiles() {
       md.map(async (file) => {
         const p = path.join(dir, file.name);
         const stat = await fs.stat(p);
-        return { name: file.name, path: p, date: stat.mtime.toISOString(), displayDate: format(stat.mtime, "yyyy-MM-dd HH:mm") };
+        return {
+          name: file.name,
+          path: p,
+          date: stat.mtime.toISOString(),
+          displayDate: format(stat.mtime, "yyyy-MM-dd HH:mm")
+        };
       })
     );
     return enriched.sort((a, b) => +new Date(b.date) - +new Date(a.date)).slice(0, 20);
